@@ -1,0 +1,17 @@
+AUX FILE IS: aux_file/Davos050807_01.aux
+CARBOEUROPE data exchange format
+Name of responsible person: Rudolf Haesler, Werner Eugster
+Sonic type: SOLENT_R2A
+Analyser type: LI-6262
+Measuring height above ground [m]: 36.0
+Canopy height [m]: 25.0
+Orientation of the u-component [0-360 deg]: 270
+Height above sea level [m]: 1670.0
+Latitude [deg,min,sec]: XX,YY,ZZ
+Year of measurement: 2005
+Sampling frequency [Hz]: 20.825
+Orientation of analyser against sonic [0-360 deg]: UNKNOWN
+Sensor separation sonic - analyser [m]: UNKNOWN
+Sensor separation add. fast temperature sensor [m]: NA
+Time constant of add. fast temperature sensor [s]: NA
+DOY,HHMM,SEC,u[m/s],v[m/s],w[m/s],Ts[degC],Tp[degC],H2O[g/m3],CO2[mmol/m3]

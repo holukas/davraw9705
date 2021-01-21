@@ -1,0 +1,516 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Time::Local;				# to determine doy
+use POSIX;                			# for floor() and ceil()
+
+# Constants
+# ---------
+
+use constant VERSION =>		1.8;			# Version of this program
+use constant DATE =>		"27.12.2012";	# Date of this program
+
+# PURPOSE
+#
+# This tool shall convert the WSL raw eddy covariance data files to the
+# CarboEurope Data Exchange Format CDEF
+# which then can be used by the available eddy software packages, including
+# my own 'convertall'
+#
+# USAGE
+#
+# Test phase:
+# (1) mount the CD-ROM with test data
+#     mount /mnt/cdrom
+# (2) execute as follows:
+#     WSL=/home/eugster/AGRL/EugsterW/PROGS/DataProcessing/wsl2cdef/wsl2cdef
+#     RAWDIR=/mnt/cdrom/CD/Raw
+#     INFILE=Davos030509_12.raw
+#     $WSL $RAWDIR/$INFILE
+#
+# HISTORY
+#
+# Started programming on this tool on 06.05.2004
+# V1.8: 27.12.2012 solved the issue with sensible heat flux which was wrong
+#	so far. See detailed notes in document CH-Dav-Version3-Data-1997-2005.pdf
+#	and notes below. In short: what is labeled "T" in the raw data files
+#	cannot be a temperature, it is almost certain that this is speed of sound!
+# V1.7: 18.10.2004 introduced a linear scaling factor for CO2 and H2O
+#	based on the intercalibration at Davos from 28.09.2004
+# V1.6: 23.09.2004 fixed uncertainties in computation of concentration
+#	values from raw voltages
+# V1.5: 03.09.2004 this version should merge auxillary files with raw files
+# V1.4: 02.09.2004 has minor adjustments to deal also with 1995 data
+# V1.3: 01.09.2004 added support for older WSL files that only have
+#       4 instead of 5 header lines
+# V1.2: 30.08.2004 added support for older WSL files where single-digit
+#       months are separated from the day in month by a space character
+# V1.1: 11.06.2004 mirrored y-axis (old R2A sonic) to comply with CDEF data
+#	format definition
+# V1.0: 07.06.2004 first working version
+
+
+# PART 1:  program specific defines (do not change)
+# -------------------------------------------------
+
+use constant HEADERLINES =>	5;		# number of lines
+use constant SAMPLINGRATE =>	20.825;		# in Hertz
+use constant MISSINGVALUE =>	-999.99;
+use constant RESPONSIBLE =>	"Rudolf Haesler, Werner Eugster";
+use constant SONIC =>		"SOLENT_R2A";
+use constant IRGA =>		"LI-6262";
+
+	# these concern the auxillary data files only:
+use constant AUXDIR =>		"aux_file";	# Aux dir relative to Raw dir
+use constant AUXHEADERLINES =>	3;
+use constant AUXSAMPLINGRATE =>	0.1;		# in Hertz
+use constant AUXTEMPOFFSET => 	273.15;		# to convert to Kelvin
+use constant C_TO_KELVIN => 	273.15;		# to convert to Kelvin
+
+# calibration coefficients for the LiCOR 6262 in use
+#
+# (1) for H2O
+#
+	# span correction for H2O - a value of 1.0 means that there is
+	# no span correction
+my $LICOR_Sw		= 1.000;		# 06.09.2004
+	# calibration coefficients for H2O
+my $LICOR_a1_h2o	= 8.1020e-3;		# 06.09.2004
+my $LICOR_a2_h2o	= -8.1540e-8;		# 06.09.2004
+my $LICOR_a3_h2o	= 1.2110e-9;		# 06.09.2004
+	# calibration temperature
+my $LICOR_T0_h2o	= 32.15;		# 23.09.2004
+	# standard pressure (LiCOR uses this in the computation)
+my $LICOR_P0_h2o	= 101.3;		# 23.09.2004
+	# aw seems to be a constant with value 1.5
+my $LICOR_aw		= 1.5;
+#
+# (2) for CO2
+#
+	# span correction for CO2 - a value of 1.0 means that there is
+	# no span correction
+my $LICOR_Sc		= 1.027330;		# 23.09.2004
+	# calibration coefficients for CO2
+my $LICOR_a1_co2	= 0.14225;		# 06.09.2004
+my $LICOR_a2_co2	= 5.9733e-6;		# 06.09.2004
+my $LICOR_a3_co2	= 9.0892e-9;		# 06.09.2004
+my $LICOR_a4_co2	= -1.2783e-12;		# 06.09.2004
+my $LICOR_a5_co2	= 8.5851e-17;		# 06.09.2004
+	# calibration temperature
+my $LICOR_T0_co2	= 32.15;		# 23.09.2004
+	# standard pressure (LiCOR uses this in the computation)
+my $LICOR_P0_co2	= 101.3;		# 23.09.2004
+
+# scaling factor to correct concentration readings
+# based on the intercalibration experiment from 28.09.2004
+# we only determined the factor for CO2 concentration data
+# but most likely we should be using the same or a similar factor
+# also for H2O
+
+my $SCALING_FACTOR_co2	= 1.114;		# 18.10.2004
+my $SCALING_FACTOR_h2o	= 1.114;		# 18.10.2004
+
+
+# PART 2:  subroutines
+# -------------------------------------------------
+
+sub output_header ($$$$){
+  my $site = shift;
+  my $height_asl = shift;
+  my $wdir_offset = shift;
+  my $currentyear = shift;
+  
+  my $responsible=RESPONSIBLE;
+  my $sonic=SONIC;
+  my $irga=IRGA;
+  my $height="36.0";
+  my $canopyheight="25.0";
+  my $orientation_of_u_component=$wdir_offset;
+  my $orientation_of_irga_to_sonic="UNKNOWN";
+  my $latitude="XX,YY,ZZ";
+  my $sampling_freq=SAMPLINGRATE;
+  my $sensor_separation="UNKNOWN";
+  
+  print("CARBOEUROPE data exchange format\n");
+  print("Name of responsible person: $responsible\n");
+  print("Sonic type: $sonic\n");
+  print("Analyser type: $irga\n");
+  print("Measuring height above ground [m]: $height\n");
+  print("Canopy height [m]: $canopyheight\n");
+  print("Orientation of the u-component [0-360 deg]: $orientation_of_u_component\n");
+  print("Height above sea level [m]: $height_asl\n");
+  print("Latitude [deg,min,sec]: $latitude\n");
+  print("Year of measurement: $currentyear\n");
+  print("Sampling frequency [Hz]: $sampling_freq\n");
+  print("Orientation of analyser against sonic [0-360 deg]: $orientation_of_irga_to_sonic\n");
+  print("Sensor separation sonic - analyser [m]: $sensor_separation\n");
+  print("Sensor separation add. fast temperature sensor [m]: NA\n");
+  print("Time constant of add. fast temperature sensor [s]: NA\n");
+  print("DOY,HHMM,SEC,u[m/s],v[m/s],w[m/s],Ts[degC],Tp[degC],H2O[g/m3],CO2[mmol/m3]\n");
+  
+  #print("$headerinfo\n");
+}
+
+
+# PART 3:  main program
+# -------------------------------------------------
+
+my $output_header=1;	# true only for the very first record
+my $date;
+my $time;
+my $index;
+my $u;
+my $v;
+my $w;
+my $c;
+my $Tv;
+my $co2;
+my $h2o;
+my $co2_calibrated;
+my $h2o_calibrated;
+my $day;
+my $month;
+my $year;
+my $hour;
+my $min;
+my $sec;
+my @dateelements;
+my @timeelements;
+my $site;
+my $altitude;
+my $wdir_offset;
+my $comm_mode;
+my $op_mode;
+my $analogs;
+my $filter_const;
+my $filter_order;
+my $averaging_interval;
+my $posixtime;
+my $doy;
+my $hhmm;
+my $xsec;
+my $xmin;
+my $xhour;
+my $xmday;
+my $xmon;
+my $xyear;
+my $wday;
+
+my $offset;
+my $bugfix_headerline = 0;
+my $datatype = "UNKNOWN";
+
+my $auxname;
+my $aux;
+my @aux;
+my @licorpress;
+my @licortemp;
+my @airpress;
+my @airtemp;
+my $maxmeteoindex;
+my $lowermeteoindex;
+my $uppermeteoindex;
+my $auxinterval;
+my $elapsedindex;
+my $elapsedtime;
+my $dtime;
+my $current_press_air;
+my $current_temp_air;
+my $current_press_licor;
+my $current_temp_licor;
+my $X;
+
+my $h2o_multiplier;
+my $co2_multiplier;
+my $doy_decimal;
+my $kappa = 1.402;	# adiabatic exponent c_p/c_v
+my $Rgas = 287.64; 	# universial gas constant for dry air, J/kg/K
+
+if($#ARGV != 0){
+  print "\nUsage:\n\n$0 <wsl_input_file> > <cedf_output_file>\n";
+  print "\nExample:\nwsl2cedf Davos030509_07.raw > Davos030509_07.cedf\n";
+  print "\n   (note that the output is directed to a file using a pipeline)\n";
+  print "\nExiting.\n\n";
+  exit;
+}
+
+
+# reading the WSL input file
+#
+# note: the files are MacIntosh files, therefore we need to set the
+# input record separator explicitly:
+
+$/ = "\r";	# input record separator definition
+
+# before we start processing the data we try to find the corresponding
+# AUX file and read it to memory because we will need these data for
+# the conversion of raw CO2 and raw H2O signals to meaningful units.
+
+$auxname=$ARGV[0];
+$auxname=~s/raw$/aux/;
+$auxname=sprintf("%s/%s",AUXDIR,$auxname);
+print "AUX FILE IS: $auxname\n";
+
+open AUX,$auxname;
+$maxmeteoindex=0;
+while($aux=<AUX>){
+  chomp $aux;
+  if(($. > AUXHEADERLINES) and @aux ne ""){
+    # print "$. @aux\n\n";
+    @aux = split(' ', $aux);
+    $airpress[$maxmeteoindex]=$aux[2];
+    $airtemp[$maxmeteoindex]=$aux[4];
+    $licorpress[$maxmeteoindex]=$aux[3];
+    $licortemp[$maxmeteoindex]=$aux[5];
+    # print "P: $airpress[$maxmeteoindex] $licorpress[$maxmeteoindex] T: $airtemp[$maxmeteoindex] $licortemp[$maxmeteoindex]\n";
+    $maxmeteoindex++;
+  }
+}
+close AUX;
+$auxinterval=1./AUXSAMPLINGRATE; 	# interval in seconds
+
+# now we're ready to process the RAW file that we have specified on the
+# command line
+
+$elapsedindex=-1;	# we need to keep track of the true line numbers
+while (<>){
+  # read each line and store it in string array @rawline
+  chomp;
+  @_ = split(' ', $_);
+  # bugfix V 1.3: check whether we might have one HEADERLINE
+  # less than we believe
+  if($. == HEADERLINES){
+    if(!m/degC/){
+      # we have one headerline less than expected and need to fix this bug
+      $bugfix_headerline=1;
+    } 
+  }
+  if($. <= (HEADERLINES-$bugfix_headerline)){
+    # print "$. $_\n";
+    if($. == 3){
+      $site = $_[0];
+      $altitude = $_[1];
+      $wdir_offset = $_[2];
+      $comm_mode = $_[3];
+      $op_mode = $_[4];
+      $analogs = $_[5];
+      $filter_const = $_[6];
+      $filter_order = $_[7];
+      $averaging_interval = $_[8];
+    }
+  }
+  else{
+    # data records
+    # there are two kinds of data records forming blocks of one
+    # second of data:
+    # the first line has 8 columns including date and time
+    # the following lines have 6 columns not including date and time
+    # In 1997 there was a space character used for single-digit months,
+    # which gives us troubles, since this is interpreted as 9 columns.
+    # Therefore, we treat the the 9-column lines together with 8 columns.
+    $elapsedindex++;
+    if($#_ == 8 || $#_ == 9){
+      $offset=0;
+      if($#_ == 9){
+        $datatype = $_[0];
+        $datatype =~ s/^[0-9]+[.][0-9]+[.]/YEAR/;
+	if($datatype eq "YEAR95"){
+	  # no need for adjustment - but remember that columns are
+	  # different!
+	  $date = $_[0];
+	}
+	else{
+          $date = sprintf("%s%s",$_[0],$_[1]);
+	  $offset = 1;
+	}
+      }
+      else{
+        $date = $_[0];
+      }
+      if($datatype eq "YEAR95"){
+     	# the first line of a data block as used in 1995
+	$time = $_[1];
+     	$index = $_[2];
+     	$u = $_[3];
+     	$v = $_[4] * (-1);   # Note: we mirror the y-axis of the R2A
+     	$w = $_[5];
+     	$Tv = $_[7];	     # we use Ta, but not Tas
+     	$co2 = $_[9] * 1.;
+     	$h2o = $_[8] * 1.;
+      }
+      else{
+ 		# the first line of a data block
+ 		$time = $_[1+$offset];
+ 		$index = $_[2+$offset];
+ 		$u = $_[3+$offset] * 0.01;
+ 		$v = $_[4+$offset] * (-0.01); # Note: we mirror the y-axis of the R2A
+ 		$w = $_[5+$offset] * 0.01;
+ 		  # $Tv was incorrect until V1.8 - it is actually speed of sound! - fixed
+ 		$c = $_[6+$offset] * 0.02;
+ 		$Tv = $c*$c/$kappa/$Rgas-273.15;	# in degC
+ 		$co2 = $_[7+$offset] * 1.;
+ 		$h2o = $_[8+$offset] * 1.;
+      }
+    }
+    else{
+      if($#_ == 6){
+        # the following lines of a data block
+        $index = $_[0];
+ 		$u = $_[1] * 0.01;
+ 		$v = $_[2] * (-0.01);	# Note: we mirror the y-axis of the R2A
+ 		$w = $_[3] * 0.01;
+ 			# $Tv was incorrect until V1.8 - it is actually speed of sound! -fixed
+ 		$c = $_[4] * 0.02;
+ 		$Tv = $c*$c/$kappa/$Rgas-273.15;	# in degC
+ 		$co2 = $_[5] * 1.;
+ 		$h2o = $_[6] * 1.;
+      }
+      else{
+        if($datatype eq "YEAR95"){
+ 	  	  # the following lines of a data block as used in 1995
+ 	  	  $index = $_[0];
+ 	  	  $u = $_[1];
+ 	  	  $v = $_[2] * (-1);   # Note: we mirror the y-axis of the R2A
+ 	  	  $w = $_[3];
+ 	  	  $Tv = $_[5];	       # we use Ta, but not Tas
+ 	  	  $co2 = $_[7] * 1.;
+ 	  	  $h2o = $_[6] * 1.;
+ 		}
+		else{
+          die("unrecognized record format at line $. ($#_ columns)");
+		}
+      }
+    }
+    # process the current record
+    @dateelements = split('[.]',$date);
+    $day = $dateelements[0];
+    $month = $dateelements[1];
+    $year = $dateelements[2];
+    if($year < 70){
+      $year += 2000;
+    }
+    else{
+      $year += 1900;
+    }
+    $elapsedtime=$elapsedindex/SAMPLINGRATE; # seconds since beginning of file
+    $lowermeteoindex=floor($elapsedtime*AUXSAMPLINGRATE);
+    $uppermeteoindex=$lowermeteoindex+1;
+    if($uppermeteoindex>=$maxmeteoindex){
+      $uppermeteoindex=$maxmeteoindex-1;	# for safety reasons ...
+    }
+    $dtime=$elapsedtime-$lowermeteoindex/AUXSAMPLINGRATE;
+	# $dtime is the time in seconds since the AUX measurement indexed
+	# by $lowermeteoindex was taken (used for linear interpolation)
+    
+    if($output_header){
+      # only now we know the year of the measurements, therefore we
+      # now output the header of the output data file
+      output_header($site,$altitude,$wdir_offset,$year);
+      $output_header=0;
+    }
+    @timeelements = split(':',$time);
+    $hour = $timeelements[0];
+    $min = $timeelements[1]; 
+    $sec = $timeelements[2] + ($index-1)/SAMPLINGRATE;
+    # now determining day of year; note that timegm() uses months 0-11 and
+    # days 1-31, and doy from gmtime is starting at 0, not at 1 as we use it.
+    $posixtime=timegm($sec,$min,$hour,$day,$month-1,$year-1900);
+    ($xsec,$xmin,$xhour,$xmday,$xmon,$xyear,$wday,$doy)=gmtime($posixtime);
+    $doy++;
+    $hhmm=$hour*100+$min;
+    
+    # The H2O and CO2 had some amplifier installed at certain times.
+    # Use the following multiplier to correct for this:
+    #
+    # TIME_PERIOD			H2O_MULTIPLIER	CO2_MULTIPLIER
+    # --------------------------------	--------------	--------------
+    # until 22.09.1998 11:00		1.00000		1.00000
+    # after this until 15.12.1998 15:00	0.33500		0.33425
+    # after 15.12.1998 15:00		0.33500		1.00000
+    
+    $h2o_multiplier=1.;
+    $co2_multiplier=1.;
+    $doy_decimal=$doy+($hour+$min/60.)/24.;
+    if($year == 1998 and $doy_decimal > 265.45833){
+      $h2o_multiplier=0.33500;
+      $co2_multiplier=0.33425;
+    }
+    if($year == 1998 and $doy_decimal > 349.625){
+      $h2o_multiplier=0.33500;
+      $co2_multiplier=1.;
+    }
+    if($year > 1998){
+      $h2o_multiplier=0.33500;
+      $co2_multiplier=1.;
+    }
+    $h2o=$h2o*$h2o_multiplier;
+    $co2=$co2*$co2_multiplier;
+    
+
+    # Calibrate the CO2 and H2O signals
+    #
+    # This is done using the previously read auxillary data
+    # as for the raw data we assume an uninterrupted data stream that
+    # begins at a certain time but may end earlier than expected. Therefore
+    # we use the SAMPLINGRATE (for RAW data) and the AUXSAMPLINGRATE
+    # (for AUX data) to determine how to merge auxillary data with raw data.
+    # We do a simple linear interpolation for the auxillary data.
+    $current_press_licor=
+      ($licorpress[$uppermeteoindex]-$licorpress[$lowermeteoindex])*
+      $dtime/$auxinterval + $licorpress[$lowermeteoindex];
+    $current_temp_licor=
+      ($licortemp[$uppermeteoindex]-$licortemp[$lowermeteoindex])*
+      $dtime/$auxinterval + $licortemp[$lowermeteoindex];
+    $current_press_air=
+      ($airpress[$uppermeteoindex]-$airpress[$lowermeteoindex])*
+      $dtime/$auxinterval + $airpress[$lowermeteoindex];
+    $current_temp_air=
+      ($airtemp[$uppermeteoindex]-$airtemp[$lowermeteoindex])*
+      $dtime/$auxinterval + $airtemp[$lowermeteoindex];
+    	# this is step 1 of 3 according to the LiCOR manual:
+	# water vapor concentration in ambient air.
+	#   Vwmeas in mV is assumed to be in $h2o
+	#   Vwzero in mV is not measured and is assumed to be zero
+    $h2o_calibrated=$h2o*$LICOR_Sw;	# no zero offset considered here!
+    $h2o_calibrated=$h2o_calibrated*$LICOR_P0_h2o/$current_press_licor;
+    $h2o_calibrated=$LICOR_a1_h2o*$h2o_calibrated+
+      $LICOR_a2_h2o*$h2o_calibrated*$h2o_calibrated+
+      $LICOR_a3_h2o*$h2o_calibrated**3;	# this should be [mmol/mol]
+    $h2o_calibrated=$h2o_calibrated*
+      ($current_temp_licor+AUXTEMPOFFSET)/($LICOR_T0_h2o+C_TO_KELVIN);
+    # $h2o_calibrated corresponds to "w" in the LiCOR sample calculatin
+
+    # since Version 1.7: correct for underpressure effects using a linear
+    # scaling factor derived on 28.09.2004 with an intercalibration
+    # experiment carried out in situ at Davos Seehornwald
+    $h2o_calibrated*=$SCALING_FACTOR_h2o;
+
+    
+    	# this is step 2 of 3 according to the LiCOR manual:
+	# water vapor corrected CO2 in ambient air.
+	#   Vcmeas in mV is assumed to be in $co2
+	#   Vczero in mV is not measured and is assumed to be zero
+    $X=1.+($LICOR_aw-1.)*$h2o_calibrated/1000.;
+    $co2_calibrated=$co2*$LICOR_Sc;	# no zero offset considered here!
+    $co2_calibrated=$co2_calibrated*$LICOR_P0_co2/
+      ($current_press_licor*$X);
+    $co2_calibrated=$LICOR_a1_co2*$co2_calibrated+
+      $LICOR_a2_co2*$co2_calibrated*$co2_calibrated+
+      $LICOR_a3_co2*$co2_calibrated**3+
+      $LICOR_a4_co2*$co2_calibrated**4+
+      $LICOR_a5_co2*$co2_calibrated**5;
+    $co2_calibrated=$X*$co2_calibrated*
+      ($current_temp_licor+AUXTEMPOFFSET)/($LICOR_T0_co2+C_TO_KELVIN);
+
+    # since Version 1.7: correct for underpressure effects using a linear
+    # scaling factor derived on 28.09.2004 with an intercalibration
+    # experiment carried out in situ at Davos Seehornwald
+    $co2_calibrated*=$SCALING_FACTOR_co2;
+
+    # print "ELAPSEDINDEX $elapsedindex $elapsedtime $lowermeteoindex $uppermeteoindex $dtime $auxinterval $current_press_licor $current_temp_licor $h2o_calibrated $X $co2_calibrated\n";
+
+    # Produce output:
+
+    print "$doy,$hhmm,$sec,$u,$v,$w,$Tv,",MISSINGVALUE,",$h2o_calibrated,$co2_calibrated\n";
+  }
+}

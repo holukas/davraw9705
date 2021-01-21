@@ -9,6 +9,8 @@ _wait/
 converted_raw_data_csv/
 original_raw_and_aux/
 log/
+__raw_data_ascii/
+raw_data_ascii/
 
 
 # Byte-compiled / optimized / DLL files
