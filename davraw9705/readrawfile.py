@@ -4,6 +4,10 @@ import os
 import numpy as np
 import pandas as pd
 
+pd.set_option('display.width', 1000)
+pd.set_option('display.max_columns', 15)
+pd.set_option('display.max_rows', 20)
+
 
 class ReadRawFile():
     def __init__(self, raw_file, indir, outdir, logger, rawfiles_orig):
@@ -15,66 +19,149 @@ class ReadRawFile():
 
         self.raw_file_fullpath = os.path.realpath(os.path.join(indir, raw_file))
         self.aux_needed_file = os.path.splitext(raw_file)[0] + '.aux'
+        self.set_colnames()  # Define column names in raw file
 
-        self.cur_datetime = self.get_datetime_from_filename()
-        self.RAW_df = self.read_file(filepath=self.raw_file_fullpath, header=3)
+        self.run()
+
+    def set_colnames(self):
+
+        self.u_col = ('U', '[m/s]')
+        self.v_col = ('V', '[m/s]')
+        self.w_col = ('W', '[m/s]')
+        self.sos_col = ('SOS', '[ms-1]')
+        self.co2_col = ('C', '[µmol/mol]')
+        self.h2o_col = ('Xw', '[mmol/mol]')
+        self.pa_col = ('Pa', '[kPa]')  # Air pressure
+        self.plic_col = ('Plic', '[kPa]')  # IRGA pressure (Licor)
+        self.ta_col = ('Ta', '[degC]')  # Air temperature
+        self.tlic_col = ('Tlic', '[degC]')  # IRGA temperature (Licor)
+        self.xa_col = ('Xa', '[mmol / mol]')
+        self.rhoa_col = ('Rhoa', '[kg / m3]')
+
+        self.timestamp_col = ('TIMESTAMP', '[yyyy-mm-dd HH:MM:SS.]')
+        self.index_col = ('Index', '[-]')
+        self.date_col = ('Date', '[-]')
+        self.time_col = ('Time', '[-]')
+        self.year_col = ('Year', '[yyyy]')
+        self.month_col = ('Month', '[mm]')
+        self.day_col = ('Day', '[dd]')
+        self.hour_col = ('Hour', '[HH]')
+        self.minute_col = ('Minute', '[MM]')
+        self.second_col = ('Second', '[SS]')
+        self.runtime_second_col = ('runtime_second', '[sec]')
+        self.microsecond_col = ('Microsecond', '[usec]')
+
+    def run(self):
+
+        # self.cur_datetime = self.get_datetime_from_filename()
+
+        # RAW FILE
+        # ========
+        # Read raw file
+        self.RAW_df = self.read_file(filepath=self.raw_file_fullpath, header=[3, 4])
+
+        # Add empty units, rename T and remove unnamed columns
+        self.RAW_df = self.sanititze_raw_colnames(df=self.RAW_df.copy())
+        self.RAW_df = self.remove_unnamed_cols(df=self.RAW_df.copy())
 
         # Make timestamp
         self.RAW_df, self.filled_date_range, \
-        self.raw_file_starttime, self.raw_starttime_year, \
-        self.raw_starttime_month, self.raw_starttime_day, \
-        self.raw_starttime_hour, self.raw_starttime_minute = \
-            self.create_raw_timestamp(df=self.RAW_df, keep_timestamp_col=True)
-
-        # Start datetime of file
-        self.cur_startdatetime = dt.datetime(int(self.raw_starttime_year), int(self.raw_starttime_month),
-                                             int(self.raw_starttime_day), int(self.raw_starttime_hour),
-                                             int(self.raw_starttime_minute))
+        self.raw_file_starttime, self.cur_startdatetime = \
+            self.create_raw_timestamp(df=self.RAW_df.copy(),
+                                      keep_timestamp_col=True)
 
         # Convert to units
-        self.RAW_df = self.convert_data()
+        self.RAW_df = self.convert_raw_to_units(df=self.RAW_df.copy())
 
+        # AUX FILE
+        # ========
         # Find respective aux file
-        self.AUX_df, self.found_aux = self.find_aux_file()
+        self.AUX_df, found_aux = self.find_aux_file()
 
+        if found_aux:
+            # Add empty units, rename T and remove unnamed columns
+            self.AUX_df = self.sanititze_raw_colnames(df=self.AUX_df.copy())
+            self.AUX_df = self.remove_unnamed_cols(df=self.AUX_df.copy())
+
+            # Make timestamp
+            self.AUX_df, aux_file_starttime = \
+                self.create_aux_timestamp_and_interpolate(df=self.AUX_df.copy(),
+                                                          filled_date_range=self.filled_date_range,
+                                                          keep_timestamp_col=True)  # make timestamp
+
+        # MERGED DATA
+        # ===========
         # Merge raw and aux data
         self.MERGED_df = self.merge_raw_aux(raw_df=self.RAW_df.copy(),
-                                            aux_df=self.AUX_df.copy())
+                                            aux_df=self.AUX_df.copy(),
+                                            found_aux=found_aux)
 
-        self.MERGED_df = self.x(df=self.MERGED_df.copy())
+        # Corrections
+        self.MERGED_df = self.apply_calibration_coefficients(df=self.MERGED_df.copy())
 
-        self.save()
+        # Make multi-row column index from tuples
+        self.MERGED_df.columns = pd.MultiIndex.from_tuples(self.MERGED_df.columns)
 
-    def save(self):
+        self.save_file(df=self.MERGED_df.copy())
+
+    def sanititze_raw_colnames(self, df):
+        # Rename units for columns where units were empty
+        new_colnames = []
+        for col in df.columns:
+            varname = col[0]
+            varunits = col[1]
+
+            if "Unnamed:" in varunits:
+                varunits = "[-]"
+
+            # For T the wrong units are in the original header file
+            if (varname == 'T') & (varunits == '[degC]'):
+                varname = "SOS"
+                varunits = "[ms-1]"
+            # # PUT UNITS IN HEADER
+            # # units = df.iloc[0]
+            # df = df.reindex(df.index.drop(0))
+            # for idx, col in enumerate(df.columns):
+            #     if str(units[idx]) != 'nan':
+            #         if (col == 'T') and (
+            #                 units[idx] == '[degC]'):  # for T the wrong units are in the original header file
+            #             df = df.rename(columns={col: 'SOS_[m/s]'})
+            #         else:
+            #             df = df.rename(columns={col: col + '_' + str(units[idx])})
+
+            new_colnames.append((varname, varunits))
+        df.columns = new_colnames
+        return df
+
+    def remove_unnamed_cols(self, df):
+        # Identify unnamed columns
+        # Some years have too many tabs in the file, more tabs than data columns
+        # empty tabs are read with col name 'Unnamed*' we use this info to delete
+        # empty data columns, so our data file only contains actual data values.
+        # Remove columns with empty (unnamed) variable name
+        for col in df.columns:
+            varname = col[0]
+            if "Unnamed:" in varname:
+                df = df.drop(col, 1)  # todo check if works
+        return df
+
+    def save_file(self, df):
         # SAVE FILE
         new_filename = os.path.join(self.outdir, self.raw_file_starttime + '.csv')
-        self.MERGED_df.to_csv(new_filename, index=False)
+        df.to_csv(new_filename, index=False)
         # contents.to_csv(new_filename, index=False)
         print("     * saved in file {}".format(new_filename))
 
-    def x(self, df):
-        # ALL DATA ARE NOW IN 1 df
-        # CONVERSION TO USEFUL UNITS
-        # so we can do calculations w/o None (None is generated after removing NULL BYTES):
+    def apply_calibration_coefficients(self, df):
         df.replace('None', np.nan, inplace=True)
         df.replace(-9999, np.nan, inplace=True)  # so we can do calculations w/o -9999
-        df = self.calibration_coefficients(df=df,
-                                           h2o_col=5,
-                                           co2_col=4,
-                                           Pa_col=6,
-                                           Plic_col=7,
-                                           Ta_col=8,
-                                           Tlic_col=9)
-        df.replace(np.nan, -9999, inplace=True)  # so we only numerics in file
-        return df
 
-    def calibration_coefficients(self, df, h2o_col, co2_col, Pa_col, Plic_col, Ta_col, Tlic_col):
-        Pa = df.iloc[:, Pa_col]  # air pressure
-        Plic = df.iloc[:, Plic_col]  # licor pressure
-        Ta = df.iloc[:, Ta_col]  # air temperature
-        Tlic = df.iloc[:, Tlic_col]  # licor temperature
-        h2o = df.iloc[:, h2o_col]  # get h2o data
-        co2 = df.iloc[:, co2_col]  # get co2 data
+        Pa = df[self.pa_col].squeeze()  # air pressure, .squeeze() converts to Series
+        Plic = df[self.plic_col].squeeze()  # licor pressure
+        Ta = df[self.ta_col].squeeze()  # air temperature
+        Tlic = df[self.tlic_col].squeeze()  # licor temperature
+        h2o = df[self.h2o_col].squeeze()  # get h2o data
+        co2 = df[self.co2_col].squeeze()  # get co2 data
 
         # from Werner Eugster's script wsl2cdef V 1.8
         # calibration coefficients for the LiCOR 6262 in use
@@ -98,7 +185,8 @@ class ReadRawFile():
         LICOR_T0_co2 = 32.15  # calibration temperature
         LICOR_P0_co2 = 101.3  # standard pressure (LiCOR uses this in the computation)
 
-        # scaling factor to correct concentration readings based on the intercalibration experiment from 28.09.2004
+        # scaling factor to correct concentration readings based on the intercalibration
+        # experiment from 28.09.2004
         # we only determined the factor for CO2 concentration data,
         # but most likely we should be using the same or a similar factor also for H2O
         SCALING_FACTOR_co2 = 1.114
@@ -116,7 +204,8 @@ class ReadRawFile():
         h2o_calibrated = h2o_calibrated * ((Tlic + 273.15) / (LICOR_T0_h2o + 273.15))
         # $h2o_calibrated corresponds to "w" in the LiCOR sample calculation
 
-        # since WE Version 1.7: correct for underpressure effects using a linear scaling factor derived on 28.09.2004 with an intercalibration
+        # since WE Version 1.7: correct for underpressure effects using a linear
+        # scaling factor derived on 28.09.2004 with an intercalibration
         # experiment carried out in situ at Davos Seehornwald
         h2o_calibrated *= SCALING_FACTOR_h2o
 
@@ -134,31 +223,39 @@ class ReadRawFile():
                          LICOR_a5_co2 * co2_calibrated ** 5  # this should MOST LIKELY be umol mol-1, approx. 370 [WE: mmol m-3]
         co2_calibrated = X * co2_calibrated * (Tlic + 273.15) / (LICOR_T0_co2 + 273.15)
 
-        # since Version 1.7: correct for underpressure effects using a linear scaling factor derived on 28.09.2004 with an intercalibration
-        # experiment carried out in situ at Davos Seehornwald
+        # since Version 1.7: correct for underpressure effects using a linear scaling
+        # factor derived on 28.09.2004 with an intercalibration experiment carried out
+        # in situ at Davos Seehornwald
         co2_calibrated *= SCALING_FACTOR_co2
 
-        df.iloc[:, h2o_col] = h2o_calibrated
-        df.iloc[:, co2_col] = co2_calibrated
+        # Update data in df with calibrated data
+        h2o_calibrated.name = self.h2o_col  # Set name to enable update of data
+        co2_calibrated.name = self.co2_col
+        df.update(h2o_calibrated)
+        df.update(co2_calibrated)
+        # df.loc[:, [self.h2o_col]] = h2o_calibrated
+        # df.loc[:, [self.co2_col]] = co2_calibrated
+
+        df.replace(np.nan, -9999, inplace=True)  # so we only numerics in file
 
         return df
 
-    def merge_raw_aux(self, raw_df, aux_df):
+    def merge_raw_aux(self, raw_df, aux_df, found_aux):
         # MERGE FILES
         # filled_date_range = pd.date_range(dataframe.index[0], dataframe.index[-1], freq='50L')  # generate continuous date range and re-index data
         # dataframe = dataframe.reindex(filled_date_range, fill_value=-9999)  # apply new continuous index to data
-        if self.found_aux:
+        if found_aux:
             MERGED_df = pd.concat([raw_df, aux_df], axis=1)
             MERGED_df.fillna(inplace=True, method='bfill')
             MERGED_df.fillna(inplace=True, method='ffill')
         else:
             MERGED_df = raw_df
-            MERGED_df['Pa_[kPa]'] = -9999
-            MERGED_df['Plic_[kPa]'] = -9999
-            MERGED_df['Ta_[degC]'] = -9999
-            MERGED_df['Tlic_[degC]'] = -9999
-            MERGED_df['Xa_[mmol / mol]'] = -9999
-            MERGED_df['Rhoa_[kg / m3]'] = -9999
+            MERGED_df[self.pa_col] = -9999
+            MERGED_df[self.plic_col] = -9999
+            MERGED_df[self.ta_col] = -9999
+            MERGED_df[self.tlic_col] = -9999
+            MERGED_df[self.xa_col] = -9999
+            MERGED_df[self.rhoa_col] = -9999
 
             # STRUCTURE OF MERGED_CONTENTS
             #   0: u
@@ -176,32 +273,34 @@ class ReadRawFile():
         return MERGED_df
 
     def create_aux_timestamp_and_interpolate(self, df, filled_date_range, keep_timestamp_col):
-        df['Date'].fillna(method='ffill', inplace=True)  # forward-fill available times
-        df['Date'] = df['Date'].str.replace(' ', '')  # remove whitespace for successful parsing
+        df[self.date_col].fillna(method='ffill', inplace=True)  # forward-fill available times
+        df[self.date_col] = df[self.date_col].str.replace(' ', '')  # remove whitespace for successful parsing
 
         try:
-            df['Year'] = pd.to_datetime(df['Date'], format='%d.%m.%y').dt.year
-            df['Month'] = pd.to_datetime(df['Date'], format='%d.%m.%y').dt.month
-            df['Day'] = pd.to_datetime(df['Date'], format='%d.%m.%y').dt.day
+            df[self.year_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%y').dt.year
+            df[self.month_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%y').dt.month
+            df[self.day_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%y').dt.day
         except:
-            df['Year'] = pd.to_datetime(df['Date'], format='%d.%m.%Y').dt.year
-            df['Month'] = pd.to_datetime(df['Date'], format='%d.%m.%Y').dt.month
-            df['Day'] = pd.to_datetime(df['Date'], format='%d.%m.%Y').dt.day
+            df[self.year_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%Y').dt.year
+            df[self.month_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%Y').dt.month
+            df[self.day_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%Y').dt.day
 
-        df['Time'].fillna(method='ffill', inplace=True)  # forward-fill available times
-        df['Time'] = df['Time'].str.replace(' ', '')  # remove whitespace for successful parsing
-        df['Hour'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.hour
-        df['Minute'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.minute
-        df['Second'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.second
+        df[self.time_col].fillna(method='ffill', inplace=True)  # forward-fill available times
+        df[self.time_col] = df[self.time_col].str.replace(' ', '')  # remove whitespace for successful parsing
+        df[self.hour_col] = pd.to_datetime(df[self.time_col], format='%H:%M:%S').dt.hour
+        df[self.minute_col] = pd.to_datetime(df[self.time_col], format='%H:%M:%S').dt.minute
+        df[self.second_col] = pd.to_datetime(df[self.time_col], format='%H:%M:%S').dt.second
 
         # df['Index'] = df['Index'].subtract(1).multiply(50000)  # conversion from index number to microseconds
         # df['Index'].replace(1000000, 0, inplace=True)
 
-        df['temp'] = df[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second']].apply(lambda s: dt.datetime(*s), axis=1)
+        df['temp'] = df[[self.year_col, self.month_col, self.day_col,
+                         self.hour_col, self.minute_col, self.second_col]].apply(
+            lambda s: dt.datetime(*s), axis=1)
         df.drop_duplicates(subset='temp', keep='last', inplace=True)
-        df.insert(0, 'TIMESTAMP', df['temp'])
+        df.insert(0, self.timestamp_col, df['temp'])
 
-        firstdatetime = df['TIMESTAMP'].iloc[0]
+        firstdatetime = df[self.timestamp_col].iloc[0]
 
         year = str(firstdatetime.year).zfill(4)
         month = str(firstdatetime.month).zfill(2)
@@ -210,11 +309,12 @@ class ReadRawFile():
         minute = str(firstdatetime.minute).zfill(2)
         starttime_str = '{}{}{}{}{}'.format(year, month, day, hour, minute)
 
-        df.drop(['Date', 'Time', 'Year', 'Month', 'Day', 'Hour', 'Minute', 'Second', 'temp'], axis=1, inplace=True)
+        df.drop([self.date_col, self.time_col, self.year_col, self.month_col, self.day_col,
+                 self.hour_col, self.minute_col, self.second_col, 'temp'], axis=1, inplace=True)
         if keep_timestamp_col:
-            df.set_index('TIMESTAMP', inplace=True)
+            df.set_index(self.timestamp_col, inplace=True)
         else:
-            df.drop(['TIMESTAMP'], axis=1, inplace=True)
+            df.drop([self.timestamp_col], axis=1, inplace=True)
 
         # print(" Generating continuous timestamp from " + str(df.index[0]) + " until " + str(df.index[-1]))
         # generate continuous date range and re-index data
@@ -235,15 +335,12 @@ class ReadRawFile():
 
     def find_aux_file(self):
         """FIND CORRESPONDING *.aux FILE"""
-        AUX_CONTENTS = None
+        AUX_df = None
         found_aux = False
         for aux_file in self.rawfiles_orig:
             if aux_file == self.aux_needed_file:
                 aux_file_fullpath = os.path.realpath(os.path.join(self.indir, aux_file))
-                AUX_CONTENTS = self.read_file(filepath=aux_file_fullpath, header=1)  # read file
-                AUX_CONTENTS, aux_file_starttime = self.create_aux_timestamp_and_interpolate(
-                    df=AUX_CONTENTS, filled_date_range=self.filled_date_range,
-                    keep_timestamp_col=True)  # make timestamp
+                AUX_df = self.read_file(filepath=aux_file_fullpath, header=[1, 2])  # read file
                 found_aux = True
                 print('\nFOUND PAIR: ' + self.raw_file + ' + ' + aux_file)
 
@@ -251,7 +348,7 @@ class ReadRawFile():
             # AUX_CONTENTS = pd.DataFrame()
             print('(!)NO PAIR: ' + self.raw_file + ' + no matching aux file found')
 
-        return AUX_CONTENTS, found_aux
+        return AUX_df, found_aux
 
     def get_multipliers(self):
         """the h2o and co2 had some amplifier installed at certain times"""
@@ -279,21 +376,21 @@ class ReadRawFile():
 
         return uvw_multiplier, sos_multiplier, co2_multiplier, h2o_multiplier
 
-    def convert_data(self):
+    def convert_raw_to_units(self, df):
         """Conversion of *.raw files"""
-        df = self.RAW_df.copy()
 
         # Multpliers for variables conversion to needed units
         uvw_multiplier, sos_multiplier, co2_multiplier, h2o_multiplier = self.get_multipliers()
         print("     * multiplier in raw: co2:{} h2o:{}".format(co2_multiplier, h2o_multiplier))
 
         # Convert to floats so we can multiply w/ floats
-        df.iloc[:, 0] = df.iloc[:, 0].astype(float)
-        df.iloc[:, 1] = df.iloc[:, 1].astype(float)
-        df.iloc[:, 2] = df.iloc[:, 2].astype(float)
-        df.iloc[:, 3] = df.iloc[:, 3].astype(float)
-        df.iloc[:, 4] = df.iloc[:, 4].astype(float)
-        df.iloc[:, 5] = df.iloc[:, 5].astype(float)
+        df = df.apply(pd.to_numeric)
+        # df.iloc[:, 0] = df.iloc[:, 0].astype(float)
+        # df.iloc[:, 1] = df.iloc[:, 1].astype(float)
+        # df.iloc[:, 2] = df.iloc[:, 2].astype(float)
+        # df.iloc[:, 3] = df.iloc[:, 3].astype(float)
+        # df.iloc[:, 4] = df.iloc[:, 4].astype(float)
+        # df.iloc[:, 5] = df.iloc[:, 5].astype(float)
 
         # Wind speeds
         # cm s-1 --> m s-1
@@ -320,54 +417,60 @@ class ReadRawFile():
 
         # CHECK AND PREPARE DATE COL
         # some files have unnecessary whitespace or letters in the Date col that need to be deleted
-        df['Date'].fillna(method='ffill', inplace=True)  # forward-fill available times
-        df['Date'] = df['Date'].str.replace(' ', '')  # remove whitespace for successful parsing
-        df['Date'] = df['Date'].replace('[a-z]', '-9999', regex=True)  # remove letters for successful parsing
+        df[self.date_col].fillna(method='ffill', inplace=True)  # forward-fill available times
+        df[self.date_col] = df[self.date_col].str.replace(' ', '')  # remove whitespace for successful parsing
+        # remove letters for successful parsing
+        df[self.date_col] = df[self.date_col].replace('[a-z]', '-9999', regex=True)
 
-        # CHECK AND PREPARE TIME COL (although it is not needed anymore b/c we build our own timestamp
-        df['Time'].fillna(method='ffill', inplace=True)
-        df['Time'] = df['Time'].str.replace(' ', '')
-        # df['Time'].ix[df['Time'].str.len() != 8]  # see: http://stackoverflow.com/questions/21556744/pandas-remove-rows-whose-date-does-not-follow-specified-format
-        df['Time'][
-            df['Time'].str.len() != 8] = '-9999'  # lines that are not in the Time format HH:MM:SS will be removed
+        # CHECK AND PREPARE TIME COL
+        # (although it is not needed anymore b/c we build our own timestamp
+        df[self.time_col].fillna(method='ffill', inplace=True)
+        df[self.time_col] = df[self.time_col].str.replace(' ', '')
+        # df['Time'].ix[df['Time'].str.len() != 8]
+        # see: http://stackoverflow.com/questions/21556744/pandas-remove-rows-whose-date-does-not-follow-specified-format
 
+        # lines that are not in the Time format HH:MM:SS will be removed
+        df[self.time_col][df[self.time_col].str.len() != 8] = '-9999'  # todo check if nec
         # df['Minute'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.minute
         # df['Second'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.second
 
         # CHECK AND PREPARE INDEX COL
-        df['Index'] = df['Index'].subtract(1).multiply(50000)  # conversion from index number to microseconds
-        df['Index'].replace(1000000, 0, inplace=True)
-        df['Index'] = df['Index'].replace(np.nan, '-9999')  # NaN can appear after removal of NULL BYTES
+        # conversion from index number to microseconds
+        df[self.index_col] = df[self.index_col].subtract(1).multiply(50000)
+        df[self.index_col].replace(1000000, 0, inplace=True)
+        df[self.index_col] = df[self.index_col].replace(np.nan, '-9999')  # NaN can appear after removal of NULL BYTES
 
         # REMOVE ERROR LINES FROM DATAFRAME todo?
-        df = df[df['Date'] != '-9999']
-        df = df[df['Time'] != '-9999']
-        df = df[df['Index'] != -9999]
+        df = df[df[self.date_col] != '-9999']
+        df = df[df[self.time_col] != '-9999']
+        df = df[df[self.index_col] != -9999]
 
         # READ DATE INFORMATION
-        df['Year'] = pd.to_datetime(df['Date'], format='%d.%m.%y').dt.year
-        df['Month'] = pd.to_datetime(df['Date'], format='%d.%m.%y').dt.month
-        df['Day'] = pd.to_datetime(df['Date'], format='%d.%m.%y').dt.day
-        df['Hour'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.hour
-        df['Index'] = df['Index'].astype(int)
+        df[self.year_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%y').dt.year
+        df[self.month_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%y').dt.month
+        df[self.day_col] = pd.to_datetime(df[self.date_col], format='%d.%m.%y').dt.day
+        df[self.hour_col] = pd.to_datetime(df[self.time_col], format='%H:%M:%S').dt.hour
+        df[self.index_col] = df[self.index_col].astype(int)
 
         # BUILD COLUMN WITH OUR OWN MINUTES, SECONDS AND MICROSECONDS
         frequency = 0.048019  # microseconds; 20.825 Hz = 1 value every 0.048019207 seconds
-        df['runtime_second'] = df.index
-        df['runtime_second'] = (df[
-                                    'runtime_second'] * frequency) - frequency  # subtract frequency so the column starts with zero seconds
-        df['Minute'] = (df['runtime_second'] / 60).astype(int)
-        df['Second'] = (df['runtime_second'] - (df['Minute'] * 60)).astype(int)
-        df['Microsecond'] = df['runtime_second'] - (df['Minute'] * 60) - df['Second']
-        df['Microsecond'] = (df['Microsecond'] * 1000000).astype(int)
+        df[self.runtime_second_col] = df.index
+        # subtract frequency so the column starts with zero seconds
+        df[self.runtime_second_col] = \
+            (df[self.runtime_second_col] * frequency)
+        df[self.minute_col] = (df[self.runtime_second_col] / 60).astype(int)
+        df[self.second_col] = (df[self.runtime_second_col] - (df[self.minute_col] * 60)).astype(int)
+        df[self.microsecond_col] = df[self.runtime_second_col] - (df[self.minute_col] * 60) - df[self.second_col]
+        df[self.microsecond_col] = (df[self.microsecond_col] * 1000000).astype(int)
 
-        df = df[df['Minute'] < 60]  # sometimes file timestamp goes longer than 1 hour, not needed
+        df = df[df[self.minute_col] < 60]  # sometimes file timestamp goes longer than 1 hour, not needed
 
         # BUILD FULL DATETIME COLUMN
         # NOTE: timestamp is not completely correct, there are duplicates written in the timestamp
-        df['TIMESTAMP'] = df[['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second', 'Microsecond']].apply(
-            lambda s: dt.datetime(*s), axis=1)
-        first_datetime = df['TIMESTAMP'].iloc[0]  # the first datetime entry in the data file
+        df[self.timestamp_col] = df[[self.year_col, self.month_col, self.day_col,
+                                     self.hour_col, self.minute_col, self.second_col,
+                                     self.microsecond_col]].apply(lambda s: dt.datetime(*s), axis=1)
+        first_datetime = df[self.timestamp_col].iloc[0]  # the first datetime entry in the data file
 
         # BUILD STARTTIME STRING FOR FILENAME
         raw_starttime_year = str(first_datetime.year).zfill(4)
@@ -380,14 +483,15 @@ class ReadRawFile():
                                             raw_starttime_minute)
 
         # REMOVE OR KEEP COLS
-        df.drop(
-            ['Date', 'Time', 'Index', 'Year', 'Month', 'Day', 'Hour', 'Minute', 'Second', 'Microsecond',
-             'runtime_second'],
-            axis=1, inplace=True)
+        df.drop([self.date_col, self.time_col, self.index_col,
+                 self.year_col, self.month_col, self.day_col,
+                 self.hour_col, self.minute_col, self.second_col,
+                 self.microsecond_col, self.runtime_second_col],
+                axis=1, inplace=True)
         if keep_timestamp_col:
-            df.set_index('TIMESTAMP', inplace=True)
+            df.set_index(self.timestamp_col, inplace=True)
         else:
-            df.drop(['TIMESTAMP'], axis=1, inplace=True)
+            df.drop([self.timestamp_col], axis=1, inplace=True)
 
         # DF TO NUMERIC
         df = df.apply(pd.to_numeric, args=('coerce',))
@@ -396,7 +500,12 @@ class ReadRawFile():
         df = df.sort_index()
         filled_date_range = df.index
 
-        return df, filled_date_range, starttime_str, raw_starttime_year, raw_starttime_month, raw_starttime_day, raw_starttime_hour, raw_starttime_minute
+        # Start datetime of file
+        cur_startdatetime = dt.datetime(int(raw_starttime_year), int(raw_starttime_month),
+                                        int(raw_starttime_day), int(raw_starttime_hour),
+                                        int(raw_starttime_minute))
+
+        return df, filled_date_range, starttime_str, cur_startdatetime
 
     def read_file(self, filepath, header):
         try:
@@ -404,10 +513,11 @@ class ReadRawFile():
             # df = pd.read_csv(file_fullpath, header=header, delimiter='\t', engine='python', tupleize_cols=True)
         except:
             try:
-                # some files (very few) have "Error: line contains NULL byte"
-                # this means there is NUL in the file when looked at in a text editor
+                # Some files (very few) have "Error: line contains NULL byte"
+                # this means there is NUL in the file when looked at it in a text editor
                 # with option "Show All Characters" or similar seems there is way to
-                # solve this following the code from http://osdir.com/ml/python-pydata/2012-05/msg00044.html:
+                # solve this following the code from:
+                #   http://osdir.com/ml/python-pydata/2012-05/msg00044.html:
                 fi = open(filepath, 'r')
                 data = fi.read()
                 fi.close()
@@ -423,26 +533,38 @@ class ReadRawFile():
                                  error_bad_lines=False)
                 # df = pd.read_csv(file_fullpath + '_NULLBYTES-REMOVED', header=header, delimiter='\t', tupleize_cols=True, error_bad_lines=False)
 
-        # DELETE EMPTY COLUMNS
-        # some years have too many tabs in the file, more tabs than data columns
-        # empty tabs are read with col name 'Unnamed*'
-        # we use this info to delete empty data columns, so our data file only contains actual data values
-        for col in df.columns:
-            if 'Unnamed:' in col:
-                df = df.drop(col, 1)
-                # df = df.rename(columns={col: col.split('_')[0]})
+        # Identify unnamed columns
+        # Some years have too many tabs in the file, more tabs than data columns
+        # empty tabs are read with col name 'Unnamed*' we use this info to delete
+        # empty data columns, so our data file only contains actual data values.
 
-        # PUT UNITS IN HEADER
-        # df.to_csv("del.csv")
-        units = df.iloc[0]
-        df = df.reindex(df.index.drop(0))
-        for idx, col in enumerate(df.columns):
-            if str(units[idx]) != 'nan':
-                if (col == 'T') and (
-                        units[idx] == '[degC]'):  # for T the wrong units are in the original header file
-                    df = df.rename(columns={col: 'SOS_[m/s]'})
-                else:
-                    df = df.rename(columns={col: col + '_' + str(units[idx])})
+        # # Rename units for columns where units were empty
+        # new_colnames = []
+        # for col in df.columns:
+        #     varname = col[0]
+        #     varunits = col[1]
+        #     if "Unnamed:" in varunits:
+        #         varunits = "[-]"
+        #
+        #     new_colnames.append((varname, varunits))
+        # df.columns = new_colnames
+        #
+        # # Remove columns with empty (unnamed) variable name
+        # for col in df.columns:
+        #     varname = col[0]
+        #     if "Unnamed:" in varname:
+        #         df = df.drop(col, 1)  # todo check if works
+        #
+        # # PUT UNITS IN HEADER
+        # # units = df.iloc[0]
+        # df = df.reindex(df.index.drop(0))
+        # for idx, col in enumerate(df.columns):
+        #     if str(units[idx]) != 'nan':
+        #         if (col == 'T') and (
+        #                 units[idx] == '[degC]'):  # for T the wrong units are in the original header file
+        #             df = df.rename(columns={col: 'SOS_[m/s]'})
+        #         else:
+        #             df = df.rename(columns={col: col + '_' + str(units[idx])})
 
         return df
 

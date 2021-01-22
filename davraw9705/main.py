@@ -5,6 +5,9 @@ import logger
 import setup
 from readrawfile import ReadRawFile
 
+# todo check if any rows are deleted during conversion, must not happen
+# todo add instrument info to header
+# todo rename columns to better names: co2, h2o, ...
 # todo unresolved issue in file Davos970107_07.aux, too many columns in first line
 
 indir = Path(r'L:\Dropbox\luhk_work\programming\DAVRAW9705_Convert_DAV_old_raw_data\original_raw_and_aux')
