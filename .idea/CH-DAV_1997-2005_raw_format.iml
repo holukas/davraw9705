@@ -11,6 +11,10 @@
       <excludeFolder url="file://$MODULE_DIR$/log" />
       <excludeFolder url="file://$MODULE_DIR$/raw" />
       <excludeFolder url="file://$MODULE_DIR$/original_raw_and_aux" />
+      <excludeFolder url="file://$MODULE_DIR$/_archive" />
+      <excludeFolder url="file://$MODULE_DIR$/_comparison" />
+      <excludeFolder url="file://$MODULE_DIR$/_raw_data_ascii" />
+      <excludeFolder url="file://$MODULE_DIR$/_raw_photoshop" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.8 (BICOFLUXRUN1) (2)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
