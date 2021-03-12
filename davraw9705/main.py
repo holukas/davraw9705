@@ -25,14 +25,14 @@ from convertrawfile import ConvertRawFile
 # todo unresolved issue in file Davos970107_07.aux, too many columns in first line
 
 
-def main(indir, outdir_run):
+def main(indir, outdir):
     cwd = Path(os.path.dirname(os.path.abspath(__file__)))  # Current working directory
     indir = Path(indir)
-    outdir_run = Path(outdir_run)
+    outdir = Path(outdir)
     run_id = setup.generate_run_id()  # Run ID
 
     # Output folders
-    outdir_run = outdir_run / f"OUT_{run_id}"
+    outdir_run = outdir / f"OUT_{run_id}"
     outdir_run_rawdata_ascii = outdir_run / 'raw_data_ascii'
     outdir_run_log = outdir_run / 'log'
     outdir_run_plots = outdir_run / 'plots'
@@ -119,7 +119,7 @@ def main(indir, outdir_run):
 
 
 if __name__ == '__main__':
-    # args = cli.get_args()
-    # main(indir=args.source_dir, outdir=args.output_dir)
-    main(indir=r'F:\CH-DAV\[CALC]_1997-2005\X-TEST-1997',
-         outdir_run=r'F:\CH-DAV\[CALC]_1997-2005\00 - DAWRAW9705_output')
+    args = cli.get_args()
+    main(indir=args.source_dir, outdir=args.output_dir)
+    # main(indir=r'F:\CH-DAV\[CALC]_1997-2005\X-TEST-1997',
+    #      outdir_run=r'F:\CH-DAV\[CALC]_1997-2005\00 - DAWRAW9705_output')
