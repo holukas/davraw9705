@@ -1,0 +1,206 @@
+/*
+SAMPLE PROGRAM
+LI-6262 IRGA
+LICOR CLOSED-PATH GAS ANALYZER
+
+The following is a sample Borland’s C program that could be used to
+calculate CO2 and/or H2O concentrations. The CO2 calculations use the
+water correction equations described in Section 3.
+*/
+
+
+/*
+gascomp.c - Implements LI-COR IRGA equations
+*/
+#include <stdio.h>
+#include <math.h>
+static double ppm(double mV, double Cr, double Tirga, double vp_r, double vp_s, double kPa);
+static double cal(double mv);
+static double temp_correction(double t);
+static double inverse_cal(double cppm);
+static double cal_slope(double mv);
+static double chi(double mfw);
+static double p0_over_p(double kPa);
+static double T_cal, K_cal, A_cal, B_cal, C_cal, D_cal, E_cal, Water_A;
+static int water_flag;
+
+
+
+/* ------------------------------------------------------------------------- */
+static double ppm(double mV, double Cr, double Tirga, double vp_r, double vp_s, double kPa)
+{
+/* This function implements Equations 6-6 (LI-6251manual), Equations 6-13 (LI-6252 manual)
+or Equations 3-29 (LI-6262 manual).
+mV - co2 signal in mV
+Cr - reference concentration (ppm)
+Tirga - Gas temp (C)
+vp_r - reference cell vapor pressure (kPa)
+vp_s - sample cell vapor pressure (kPa)
+kPa - total pressure (kPa)
+*/
+double Vref, gain, chi_ws, chi_wr, eff_cr, tc, eff_mv, result, inv_cal;
+tc = temp_correction(Tirga);
+
+if (Cr == 0.0) {
+	/* absolute mode */
+	chi_ws = chi(vp_s/kPa);
+	eff_mv = mV/chi_ws*p0_over_p(kPa);
+	result = chi_ws * cal(eff_mv) * tc;
+	return result;
+}
+
+/* differential mode */
+chi_wr = chi(vp_r/kPa);
+eff_cr = Cr / temp_correction(Tirga) / chi_wr;
+inv_cal = inverse_cal(eff_cr);
+Vref = chi_wr * inv_cal / p0_over_p(kPa);
+gain = (1.0 - Vref/K_cal);
+return ppm(Vref + mV*gain, 0, Tirga, 0, vp_s, kPa);
+}
+/* ------------------------------------------------------------------------- */
+
+
+
+static double cal(double mv)
+{
+/* The basic irga cal equation - polynomial
+*/
+double rtn;
+rtn = (A_cal + (B_cal + (C_cal + (D_cal + E_cal*mv)*mv)*mv)*mv)*mv;
+return rtn;
+}
+/* ------------------------------------------------------------------------- */
+
+static double temp_correction(double t)
+{
+return (t + 273)/(T_cal + 273);
+}
+/* ------------------------------------------------------------------------- */
+static double inverse_cal(double cppm)
+{
+/* returns the mV that would be generated if in absolute mode with
+cppm in the sample cell
+*/
+double mv_old = 0, mv, c;
+/* crude first guess
+*/
+if (water_flag)
+mv = cppm/75 * 5000;
+else
+mv = cppm/3000 * 5000;
+while (fabs(mv - mv_old) > 0.5) {
+mv_old = mv;
+c = cal(mv_old);
+mv = mv_old - (c - cppm) / (cal_slope(mv_old));
+}
+return mv;
+}
+/* ------------------------------------------------------------------------- */
+
+static double cal_slope(double mv)
+{
+/* returns the slope of the cal function
+*/
+return A_cal + (2*B_cal + (3*C_cal + (4*D_cal + 5*E_cal*mv)*mv)*mv)*mv;
+}
+/* ------------------------------------------------------------------------- */
+static double chi(double mfw)
+{
+/* Eqn 3-21 (LI-6262 manual) or 6-5 (LI-6251 or LI-6252 manual).
+*/
+return 1 + (Water_A -1) * mfw;
+}
+/* ------------------------------------------------------------------------- */
+static double p0_over_p(double kPa)
+{
+if (water_flag)
+/* return (101.3 / kPa) * 0.88451 + 0.10889; */ /* The LI-6262 approx. */
+return pow(101.3 / kPa, 0.9);
+else
+return 101.3 / kPa;
+}
+/* ------------------------------------------------------------------------- */
+/* ------------------------------------------------------------------------- */
+
+double compute_co2(double Cal_temp, double Cal_k, double coeffs[],
+double mv, double temp, double ref, double pressure,
+double vap_ref, double vap_samp, double water_corr_a,
+int vapor_correct_flag)
+{
+/*
+Compute co2 concentration (umol/mol)
+Cal_temp - calibration temp (C)
+Cal_k - calibration K factor
+coeffs[] - Calibration A, B, C, D, and E
+mv - raw CO2 signal (mV)
+temp - IRGA temp (C)
+ref - Co2 reference concentration (umol/mol)
+vap_ref - Vapor concentration (mmol/mol) of reference side
+vap_samp - Vapor concentration (umol/mol) of sample side
+water_corr_a - A value for water correction
+vapor_correct_flag - 0 no vapor corrections
+1 band broadening only
+2 band broadening, and dilution based on ref
+Returns CO2 concentration in umol/mol
+*/
+double Cs;
+water_flag = 0;
+T_cal = Cal_temp;
+K_cal = Cal_k;
+A_cal = coeffs[0];
+B_cal = coeffs[1];
+C_cal = coeffs[2];
+D_cal = coeffs[3];
+E_cal = coeffs[4];
+Water_A = water_corr_a;
+if (vapor_correct_flag == 0) {
+vap_ref = 0;
+vap_samp = 0;
+}
+Cs = ppm(mv, ref, temp, vap_ref/1000.0*pressure,
+vap_samp/1000.0*pressure, pressure);
+/* The dilution correction is hypothetical. It says what the concentration
+in the sample cell would be if the water vapor concentration there
+were the same as in the reference cell.
+*/
+if (vapor_correct_flag == 2)
+Cs *= (1.0 - vap_ref/1000.0) / (1.0 - vap_samp/1000.0);
+return Cs;
+}
+/* ------------------------------------------------------------------------- */
+
+double compute_h2o(double Cal_temp, double Cal_k, double coeffs[],
+double mv, double temp, double ref, double pressure)
+{
+/*
+Compute co2 concentration (umol/mol)
+Cal_temp - calibration temp (C)
+Cal_k - calibration K factor
+coeffs[] - Calibration A, B, C
+mv - raw H2O signal (mV)
+temp - IRGA temp (C)
+ref - H2O reference concentration (umol/mol)
+Returns water vapor concentration in mmol/mol
+*/
+double Ws;
+water_flag = 1;
+T_cal = Cal_temp;
+K_cal = Cal_k;
+A_cal = coeffs[0];
+B_cal = coeffs[1];
+C_cal = coeffs[2];
+D_cal = 0;
+E_cal = 0;
+Ws = ppm(mv, ref, temp, 0, 0, pressure);
+return Ws;
+}
+/* ------------------------------------------------------------------------- */
+double dewpoint(double vp_kPa)
+{
+double z;
+z = log10(vp_kPa / .61083);
+return 242.62 * z / ( 7.6448 - z);
+}
+/* ------------------------------------------------------------------------- */
+
+	
