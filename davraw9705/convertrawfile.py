@@ -478,27 +478,15 @@ class ConvertRawFile():
         return df
 
     def merge_raw_aux(self, raw_df, aux_df):
-        # MERGE FILES
+        """Merge raw and aux files"""
+        self.log.info(f"    Merging raw file ({len(raw_df)} rows) with aux file ({len(aux_df)} rows) ...")
         MERGED_df = pd.concat([raw_df, aux_df], axis=1)
         MERGED_df.fillna(inplace=True, method='bfill')
         MERGED_df.fillna(inplace=True, method='ffill')
-
-        # STRUCTURE OF MERGED_CONTENTS
-        #   0: u
-        #   1: v
-        #   2: w
-        #   3: Ts
-        #   4: CO2
-        #   5: H2O
-        #   6: Pa
-        #   7: Plic
-        #   8: Ta
-        #   9: Tlic
-        #  10: Xa
-        #  11: Rhoa
         return MERGED_df
 
     def create_aux_timestamp_and_interpolate(self, df, filled_date_range, keep_timestamp_col):
+        self.log.info(f"    Adjusting timestamp of aux file and upscaling data (linear interpolation) ...")
         df[self.date_col].fillna(method='ffill', inplace=True)  # forward-fill available times
         df[self.date_col] = df[self.date_col].str.replace(' ', '')  # remove whitespace for successful parsing
 
@@ -538,13 +526,13 @@ class ConvertRawFile():
         else:
             df.drop([self.timestamp_col], axis=1, inplace=True)
 
-        # print(" Generating continuous timestamp from " + str(df.index[0]) + " until " + str(df.index[-1]))
-        # generate continuous date range and re-index data
-        # filled_date_range = pd.date_range(df.index[0], df.index[-1], freq=this_file_freq)
+        # Resample (upsample) the low-res aux data to match high-res raw data, interpolate
         df = df.sort_index()
-        df = df.reindex(filled_date_range, fill_value=-9999, method='nearest')  # Old method
-        # df = df.reindex(filled_date_range)  # apply new continuous index to data
-        # df = df.interpolate(method='linear', axis=0, limit=None, inplace=False)  # Linear interpolation for missing vals
+        df = df.resample('0.01S').interpolate(method='linear', axis=0, limit=None, inplace=False)
+        df = df.reindex(filled_date_range, tolerance='0.048sec', method='nearest')  # apply new continuous index to data
+
+        # df = df.reindex(filled_date_range, fill_value=-9999, method='nearest')  # Old method
+        # tidx = pd.date_range(df.index.min(), df.index.max(), freq='0.048S')
         # df = df.fillna(method='backfill', inplace=False)  # Back-fill to get values for start of file
         # df = df.fillna(method='ffill', inplace=False)  # Forward-fill to make sure there are no missing vals
 
@@ -552,7 +540,6 @@ class ConvertRawFile():
         df = df.apply(pd.to_numeric, args=('coerce',))
         df = df.astype(float)
 
-        # # interpolate between values
         # df.replace(-9999, np.nan, inplace=True)
         # df = df.apply(pd.Series.interpolate)
         # df.replace(np.nan, -9999, inplace=True)  # should not be necessary
@@ -708,13 +695,23 @@ class ConvertRawFile():
             self.log.info(f"    (!)WARNING     Trying to parse NULLBYTES-REMOVED ...")
 
             try:
-                df = pd.read_csv(_file_nullbytes, header=header_rows_list, delimiter='\t', engine='python')
-                self.log.info(f"    (!)WARNING     Worked.")
+                # df = pd.read_csv(_file_nullbytes, header=header_rows_list, delimiter='\t', engine='python')
+                df, _ = files.parse_csv_file(filepath=_file_nullbytes,
+                                             skip_rows_list=skip_rows_list,
+                                             header_rows_list=header_rows_list,
+                                             header_section_rows_list=header_section_rows_list)
+                self.log.info(f"    (!)WARNING     Success! Reading file {_file_nullbytes} worked.")
             except Exception as e:
                 self.log.info(f"    (!)WARNING     Failed!")
                 self.log.info(f"    (!)WARNING     Trying to parse NULLBYTES-REMOVED file by skipping error lines ...")
-                df = pd.read_csv(_file_nullbytes, header=header_rows_list, delimiter='\t', error_bad_lines=False)
-                self.log.info(f"    (!)WARNING     Worked.")
+                # df = pd.read_csv(_file_nullbytes, header=header_rows_list, delimiter='\t', error_bad_lines=False)
+                df, _ = files.parse_csv_file(filepath=_file_nullbytes,
+                                             skip_rows_list=skip_rows_list,
+                                             header_rows_list=header_rows_list,
+                                             header_section_rows_list=header_section_rows_list,
+                                             error_bad_lines=False)
+                self.log.info(f"    (!)WARNING     Success! Skipping bad lines while reading file "
+                              f"{_file_nullbytes} worked.")
 
         self.log.info(f"    {filepath.name}  columns:  {len(df.columns)}  /  rows:  {len(df)}")
         return df

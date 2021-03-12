@@ -121,5 +121,5 @@ def main(indir, outdir):
 if __name__ == '__main__':
     args = cli.get_args()
     main(indir=args.source_dir, outdir=args.output_dir)
-    # main(indir=r'F:\CH-DAV\[CALC]_1997-2005\X-TEST-1997',
-    #      outdir_run=r'F:\CH-DAV\[CALC]_1997-2005\00 - DAWRAW9705_output')
+    # main(indir=r'F:\CH-DAV\[CALC]_1997-2005\X-TEST',
+    #      outdir=r'F:\CH-DAV\[CALC]_1997-2005\00-DAWRAW9705_output')

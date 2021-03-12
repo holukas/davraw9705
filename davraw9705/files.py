@@ -49,7 +49,7 @@ def search_all(search_root, log):
     return found_pairs_dict
 
 
-def parse_csv_file(filepath, skip_rows_list, header_rows_list, header_section_rows_list):
+def parse_csv_file(filepath, skip_rows_list, header_rows_list, header_section_rows_list, error_bad_lines=True):
     """ Read file into df. """
     # print(filepath)
 
@@ -75,7 +75,8 @@ def parse_csv_file(filepath, skip_rows_list, header_rows_list, header_section_ro
                           skip_blank_lines=True,
                           engine='python',
                           encoding='unicode_escape',
-                          index_col=False)
+                          index_col=False,
+                          error_bad_lines=error_bad_lines)
 
     return data_df, generated_missing_header_cols_list
 
