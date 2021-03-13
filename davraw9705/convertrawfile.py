@@ -50,7 +50,7 @@ class ConvertRawFile():
     SCALING_FACTOR_h2o = 1.114
 
     def __init__(self, raw_file, indir, outdir_rawdata_ascii, log, raw_file_fullpath, aux_file_fullpath, run_id,
-                 numfiles, filecounter, outdir_plots_hires, profile_factors_df):
+                 numfiles, filecounter, outdir_plots_hires, profile_factors_df, outdir_run_temp):
         self.indir = indir
         self.outdir = outdir_rawdata_ascii
         self.log = log
@@ -62,6 +62,7 @@ class ConvertRawFile():
         self.filecounter = filecounter
         self.outdir_plots_hires = outdir_plots_hires
         self.profile_factors_df = profile_factors_df
+        self.outdir_run_temp=outdir_run_temp
 
         self.filestats_df = pd.DataFrame()
         self.set_colnames()  # Define column names in raw file
@@ -683,12 +684,24 @@ class ConvertRawFile():
             # with option "Show All Characters" or similar seems there is way to
             # solve this following the code from:
             #   http://osdir.com/ml/python-pydata/2012-05/msg00044.html:
-            fi = open(filepath, 'r')
-            data = fi.read()
+            # Update Mar 2021: I think there are only two files between 1997-2005 where
+            # this exception occurs with the current way of reading files:
+            #   'Davos010920_13.raw' and 'Davos000827_08.raw'
+
+            # Read problematic file
+            fi = open(filepath, 'r')  # Open the problematic file for reading
+            data = fi.read()  # Read file
             fi.close()
-            _file_nullbytes = f"{filepath}_NULLBYTES-REMOVED.aux"
-            fo = open(_file_nullbytes, 'w')
-            fo.write(data.replace('\x00', ''))  # remove NULL BYTES
+
+            # Remove NULLBYTES from problematic data and write to new file
+            # This step saves the new file to the temp folder of this run.
+
+            # Assign new name
+            _problematic_file_name = filepath.name
+            _file_nullbytes = self.outdir_run_temp /  f"{_problematic_file_name}_NULLBYTES-REMOVED.aux"
+            # _file_nullbytes = f"{filepath}_NULLBYTES-REMOVED.aux"
+            fo = open(_file_nullbytes, 'w')  # Open new file
+            fo.write(data.replace('\x00', ''))  # Remove NULLBYTES and write to new file
             fo.close()
 
             self.log.info(f"    (!)WARNING     Done.")

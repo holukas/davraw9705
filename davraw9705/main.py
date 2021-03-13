@@ -33,13 +33,14 @@ def main(indir, outdir):
 
     # Output folders
     outdir_run = outdir / f"OUT_{run_id}"
+    outdir_run_temp = outdir_run / 'temp'
     outdir_run_rawdata_ascii = outdir_run / 'raw_data_ascii'
     outdir_run_log = outdir_run / 'log'
     outdir_run_plots = outdir_run / 'plots'
     outdir_run_plots_hires = outdir_run_plots / 'hires'
     outdir_run_plots_agg = outdir_run_plots / 'agg'
     create_dirs = [outdir_run, outdir_run_rawdata_ascii, outdir_run_log, outdir_run_plots,
-                   outdir_run_plots_hires, outdir_run_plots_agg]
+                   outdir_run_plots_hires, outdir_run_plots_agg, outdir_run_temp]
     for cd in create_dirs:
         if not os.path.exists(cd):
             os.makedirs(cd)
@@ -86,7 +87,8 @@ def main(indir, outdir):
                                       log=log, run_id=run_id,
                                       numfiles=numfiles,
                                       filecounter=filecounter,
-                                      profile_factors_df=profile_factors_df).get_filestats()
+                                      profile_factors_df=profile_factors_df,
+                                      outdir_run_temp=outdir_run_temp).get_filestats()
 
         # Collect aggregated stats for each file
         if filecounter == 1:
