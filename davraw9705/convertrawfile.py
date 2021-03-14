@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 
 import files
-import plots
 import stats
 
 pd.set_option('display.width', 1000)
@@ -62,7 +61,7 @@ class ConvertRawFile():
         self.filecounter = filecounter
         self.outdir_plots_hires = outdir_plots_hires
         self.profile_factors_df = profile_factors_df
-        self.outdir_run_temp=outdir_run_temp
+        self.outdir_run_temp = outdir_run_temp
 
         self.filestats_df = pd.DataFrame()
         self.set_colnames()  # Define column names in raw file
@@ -124,7 +123,7 @@ class ConvertRawFile():
         # hh_groups = MERGED_df.groupby(pd.Grouper(freq='30T'))  # Half-hourly groups in hourly file
         # for name, group in hh_groups:
         #     print(group.index[0])
-            # group.to_csv(string.replace(str(name), ':', '_') + '.csv')
+        # group.to_csv(string.replace(str(name), ':', '_') + '.csv')
 
         # # Plot high-res data  # todo act
         # plots.high_res_ts(df=MERGED_df, outfile=self.raw_file, outdir=self.outdir_plots_hires, logger=self.log)
@@ -529,7 +528,17 @@ class ConvertRawFile():
 
         # Resample (upsample) the low-res aux data to match high-res raw data, interpolate
         df = df.sort_index()
-        df = df.resample('0.01S').interpolate(method='linear', axis=0, limit=None, inplace=False)
+        try:
+            df = df.resample('0.01S').interpolate(method='linear', axis=0, limit=None, inplace=False)
+        except TypeError as e:
+            # Can happen if not all rows numeric, e.g. if one row shows dates instead of data (e.g. Davos971112_11.aux)
+            self.log.info(f"    (!)WARNING  Exception encountered in aux file:")
+            self.log.info(f"                {e}")
+            self.log.info(
+                f"                Problematic row(s) will be set to NaN, then filled with interpolated values.")
+            df = df.apply(pd.to_numeric, args=('coerce',))
+            df = df.resample('0.01S').interpolate(method='linear', axis=0, limit=None, inplace=False)
+
         df = df.reindex(filled_date_range, tolerance='0.048sec', method='nearest')  # apply new continuous index to data
 
         # df = df.reindex(filled_date_range, fill_value=-9999, method='nearest')  # Old method
@@ -698,7 +707,7 @@ class ConvertRawFile():
 
             # Assign new name
             _problematic_file_name = filepath.name
-            _file_nullbytes = self.outdir_run_temp /  f"{_problematic_file_name}_NULLBYTES-REMOVED.aux"
+            _file_nullbytes = self.outdir_run_temp / f"{_problematic_file_name}_NULLBYTES-REMOVED.aux"
             # _file_nullbytes = f"{filepath}_NULLBYTES-REMOVED.aux"
             fo = open(_file_nullbytes, 'w')  # Open new file
             fo.write(data.replace('\x00', ''))  # Remove NULLBYTES and write to new file
