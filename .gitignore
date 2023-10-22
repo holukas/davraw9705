@@ -1,18 +1,12 @@
 # Custom
-dist/
-_archive/
-_comparison/
-_DAV_final_fluxes/
-_EP/
-_info_WE/
-_wait/
-converted_raw_data_csv/
-original_raw_and_aux/
-log/
-__raw_data_ascii/
-raw_data_ascii/
-_raw_photoshop/
-
+/.idea/
+/_archive/
+/_comparison/
+/_info_WE/
+/_raw_photoshop/
+/_testdata/
+/log/
+_testdata
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

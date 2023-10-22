@@ -5,16 +5,13 @@
       <sourceFolder url="file://$MODULE_DIR$/davraw9705" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/_DAV_final_fluxes" />
       <excludeFolder url="file://$MODULE_DIR$/_EP" />
-      <excludeFolder url="file://$MODULE_DIR$/_info_WE" />
       <excludeFolder url="file://$MODULE_DIR$/_wait" />
       <excludeFolder url="file://$MODULE_DIR$/converted_raw_data_csv" />
-      <excludeFolder url="file://$MODULE_DIR$/log" />
       <excludeFolder url="file://$MODULE_DIR$/raw" />
       <excludeFolder url="file://$MODULE_DIR$/original_raw_and_aux" />
-      <excludeFolder url="file://$MODULE_DIR$/_archive" />
-      <excludeFolder url="file://$MODULE_DIR$/_comparison" />
       <excludeFolder url="file://$MODULE_DIR$/_raw_data_ascii" />
-      <excludeFolder url="file://$MODULE_DIR$/_raw_photoshop" />
+      <excludeFolder url="file://$MODULE_DIR$/_testdata/OUT_davraw9705/OUT_DAVRAW9705-20230713-185933/log" />
+      <excludeFolder url="file://$MODULE_DIR$/_testdata/OUT_davraw9705/OUT_DAVRAW9705-20230713-185933/raw_data_ascii" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.8 (BICOFLUXRUN1) (2)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

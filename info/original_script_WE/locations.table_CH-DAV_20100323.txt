@@ -1,0 +1,66 @@
+# locations.table
+#
+# The locations.table files contain legacy information about measurement heights and sonic orientation.
+#
+# Note: each line which contains a hash sign (#) on the very beginning
+# is considered to be a comment. Also blank lines are skipped.
+#
+# The columns to provide are:
+#  1. beginning date (in non-american notation: dd.mm.yy)
+#  2. beginning time (in 24 hours notation: hh:mm:ss)
+#  3. ending date
+#  4. ending time
+#  5. time base: UTC, MEZ, MESZ, ADT or number of hours difference to
+#     UTC (this is local time minus UTC)
+#  6. measuring height above ground (meters) or, if you measured
+#     measuring height above displacement height, then give this value
+#     here and set the vegetation height and displacement height to NA
+#  7. vegetation height above ground (meters) or NA
+#  8. displacement height (meters) or NA
+#  9. wind direction offset (angle between geogr. north and sonic north)
+# 10. number of analog channels; this must be the same number as in the
+#     header of the raw data file, if you do not want to end up
+#     having problems later somewhere.
+# 11. and more: depending on the settings in column 10. Starting
+#     with column 11 the number of columns defined in 10 will
+#     read as time lags in number of raw records (so this value
+#     depends on the sampling rate!). Note: if you specify NU (not used)
+#     in the lag column(s), this is equivalent to an exclude statement
+#     in the calibration table when using the POLLUMET concept.
+#     The next column is the prefix of the dataset (or NA).
+#     The remaining columns are read in and concatenated to obtain
+#     a string describing this location.
+#
+# If you choose the USEARCSSCONCEPT (see calibration.h), convertall will also
+# check whether the LOCATIONs match between the calibration table specified
+# by DEFAULTCALIBTAB in convertall.h, since it could be unclear from the 
+# data filename, from which location the data are.
+# In the USEPOLLUMETCONCEPT configuration it is assumed that all data file
+# names start with prefix, followed by the time information. Such filenames
+# would be too large for PCs running DOS, therefore there is no prefix
+# for the USEARCSSCONCEPT (write NA in the appropriate column).
+#
+# Often times you will set the time lags to UK and run everything through
+# converall determining the actual time lag. From this output you can
+# make a statistics and determine an average time lag which you than can
+# place in this table and reprocess the whole data after recompiling
+# convertall with FINDACTUALLAG set to FALSE in convertall.h
+# Normally the actual lag should be the best value to use, but for
+# comparisions with people who only can process their data with a fixed
+# time lag, this could be useful (or if the time lag seems to freak out
+# when you run convertall with FINDACTUALLAG set TRUE).
+
+# BEGINNING         ENDING              TZ   Z     H0    D0   DIR AN LAGS.......  PREFIX  LOCATION
+
+01.01.2000 00:00:00 31.05.2000 23:59:59 MEZ  7.00  0.3   0.2  0   0               NA      Kerzersmoos FM-Test
+31.05.2000 00:00:00 31.12.2000 23:59:59 MEZ  31.50 19.0  12.5 0   0               NA      BAYREUTH-Finimsas
+01.01.2000 00:00:00 31.12.2000 23:59:59 MEZ  31.50 19.0  12.5 0   0               d       Fichtel FM-Thomas
+01.05.2002 00:00:00 31.12.2004 23:59:59 MEZ  31.50 19.0  12.5 0   0               NA      CARBOMONT Seebodenalp
+01.01.1995 00:00:00 09.08.2005 09:30:00 MEZ  36.0  25.0  20.0 235 2 UK UK         Davos   Davos Seehornwald WSL
+10.08.2005 12:31:00 19.12.2006 23:59:59 MEZ  36.0  25.0  20.0 239 0               NA      Davos Seehornwald ETH R2A
+20.12.2006 00:00:00 31.12.2010 23:59:59 MEZ  36.0  25.0  20.0 319 0               NA      Davos Seehornwald ETH R3-50
+
+
+# UK = time lag unknown (but analog channel was used)
+# NU = data channel was not used
+# NA = not available, data not provided or unknown value

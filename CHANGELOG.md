@@ -17,3 +17,4 @@
 - changed: all rows in raw files are kept
 - changed: timestamp for each row in the high-resolution raw data files is now generated
   by combining the start time as given in the filename and the total runtime of the file
+- bug: reading aux file crashed if one row contained dates (str) instead of data

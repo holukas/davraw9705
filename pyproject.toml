@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "davraw9705"
+version = "0.1.0"
+description = ""
+authors = ["holukas <holukas@ethz.ch>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pandas = "^2.0.3"
+matplotlib = "^3.7.2"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
